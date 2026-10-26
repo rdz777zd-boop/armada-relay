@@ -2,7 +2,36 @@
 export class Room {
   constructor(state) { this.state = state; }
   all() { return this.state.getWebSockets(); }
+  async db(req) {
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
+    const J = (v, s = 200) => new Response(JSON.stringify(v), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } });
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+    const u = new URL(req.url), parts = u.pathname.replace(/^\/db/, '').replace(/\.json$/, '').split('/').filter(Boolean), top = parts[0];
+    if (parts.length > 4 || parts.some(x => !/^[A-Za-z0-9_-]{1,40}$/.test(x)) || (top && !['players', 'clans', 'clanstats', 'requests', 'inbox'].includes(top))) return J(null, 400);
+    if (req.method === 'GET') {
+      if (!top) return J(null);
+      let v = (await this.state.storage.get(top)) ?? null;
+      for (const p of parts.slice(1)) v = v && typeof v === 'object' ? (v[p] ?? null) : null;
+      const ob = u.searchParams.get('orderBy'), lim = +u.searchParams.get('limitToLast');
+      if (ob && lim && v && typeof v === 'object' && parts.length === 1) {
+        let f = ''; try { f = JSON.parse(ob); } catch {}
+        v = Object.fromEntries(Object.entries(v).sort((a, b) => (+(a[1] && a[1][f]) || 0) - (+(b[1] && b[1][f]) || 0)).slice(-lim));
+      }
+      return J(v);
+    }
+    if (parts.length < 2 || (req.method !== 'PUT' && req.method !== 'DELETE')) return J(null, 400);
+    let body = null;
+    if (req.method === 'PUT') { const t = await req.text(); if (t.length > 4000) return J(null, 413); try { body = JSON.parse(t); } catch { return J(null, 400); } }
+    const root = (await this.state.storage.get(top)) || {};
+    let o = root;
+    for (let i = 1; i < parts.length - 1; i++) o = o[parts[i]] = (o[parts[i]] && typeof o[parts[i]] === 'object') ? o[parts[i]] : {};
+    const leaf = parts[parts.length - 1];
+    if (req.method === 'PUT') o[leaf] = body; else delete o[leaf];
+    await this.state.storage.put(top, root);
+    return J(body);
+  }
   async fetch(req) {
+    if (new URL(req.url).pathname.startsWith('/db')) return this.db(req);
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('ws only', { status: 426 });
     const lb = new URL(req.url).pathname === '/lobby';
     if (!lb && this.all().length >= 8) return new Response('full', { status: 429 });
@@ -37,6 +66,11 @@ export class Room {
         a.q = [1, 2, 4].includes(d.m) ? d.m : 1; a.qt = Date.now(); ws.serializeAttachment(a);
         await this.state.storage.setAlarm(Date.now() + 1500);
       } else if (d.k === 'qc') { a.q = 0; ws.serializeAttachment(a); }
+      else if (d.k === 'iv' && a.n && /^[a-z0-9]{3,8}$/.test(d.r)) {
+        const to = String(d.to || '').toLowerCase(); let ok = 0;
+        for (const x of this.all()) { const b = x.deserializeAttachment(); if (x !== ws && b && b.lb && b.n && b.n.toLowerCase() === to) { try { x.send(JSON.stringify({ k: 'iv', from: a.n, c: d.r })); ok = 1; } catch {} } }
+        ws.send(JSON.stringify({ k: 'ivr', ok }));
+      }
       return;
     }
     if (d.k === 'pg') { ws.send(JSON.stringify({ k: 'pg', t: d.t })); return; }
@@ -72,6 +106,7 @@ export class Room {
 export default {
   fetch(req, env) {
     const p = new URL(req.url).pathname;
+    if (p.startsWith('/db')) return env.ROOM.get(env.ROOM.idFromName('DB#')).fetch(req);
     if (p === '/lobby') return env.ROOM.get(env.ROOM.idFromName('LOBBY#')).fetch(req);
     const m = p.match(/^\/room\/([a-z0-9]{3,8})$/);
     if (!m) return new Response('Armada Royale relay OK');
