@@ -1,4 +1,5 @@
 // Armada Royale 3D: salas + lobby online + fila de partida (Cloudflare Workers + Durable Objects, plano gratis)
+// Versao com salas criadas na America do Sul (locationHint 'sam') e menos gravacoes de estado.
 export class Room {
   constructor(state) { this.state = state; }
   all() { return this.state.getWebSockets(); }
@@ -74,7 +75,11 @@ export class Room {
       return;
     }
     if (d.k === 'pg') { ws.send(JSON.stringify({ k: 'pg', t: d.t })); return; }
-    if (d.k === 's') { a.p = d.s; ws.serializeAttachment(a); }
+    if (d.k === 's') {
+      // guarda o estado para quem entra depois, no maximo 1x por segundo (o repasse aos outros continua em tempo real)
+      const t = Date.now();
+      if (!a.pt || t - a.pt > 1000) { a.p = d.s; a.pt = t; ws.serializeAttachment(a); }
+    }
     else if (d.k !== 'e') return;
     d.f = a.id;
     const out = JSON.stringify(d);
@@ -103,13 +108,17 @@ export class Room {
   }
   webSocketError(ws) { this.webSocketClose(ws); }
 }
+
+// Salas e lobby novos, pedidos na America do Sul. O banco (DB#) continua igual para nao perder o ranking.
+const stub = (env, name) => env.ROOM.get(env.ROOM.idFromName(name), { locationHint: 'sam' });
+
 export default {
   fetch(req, env) {
     const p = new URL(req.url).pathname;
     if (p.startsWith('/db')) return env.ROOM.get(env.ROOM.idFromName('DB#')).fetch(req);
-    if (p === '/lobby') return env.ROOM.get(env.ROOM.idFromName('LOBBY#')).fetch(req);
+    if (p === '/lobby') return stub(env, 'LOBBY2#').fetch(req);
     const m = p.match(/^\/room\/([a-z0-9]{3,8})$/);
     if (!m) return new Response('Armada Royale relay OK');
-    return env.ROOM.get(env.ROOM.idFromName(m[1])).fetch(req);
+    return stub(env, 'r2#' + m[1]).fetch(req);
   }
 };
