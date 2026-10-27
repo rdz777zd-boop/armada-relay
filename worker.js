@@ -31,7 +31,13 @@ export class Room {
     await this.state.storage.put(top, root);
     return J(body);
   }
+  async where() {
+    let colo = '?';
+    try { const t = await (await fetch('https://workers.cloudflare.com/cdn-cgi/trace')).text(); const m = t.match(/colo=(\w+)/); if (m) colo = m[1]; } catch {}
+    return new Response(JSON.stringify({ room: colo }), { headers: { 'Content-Type': 'application/json' } });
+  }
   async fetch(req) {
+    if (new URL(req.url).pathname === '/where') return this.where();
     if (new URL(req.url).pathname.startsWith('/db')) return this.db(req);
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('ws only', { status: 426 });
     const lb = new URL(req.url).pathname === '/lobby';
@@ -113,8 +119,15 @@ export class Room {
 const stub = (env, name) => env.ROOM.get(env.ROOM.idFromName(name), { locationHint: 'sam' });
 
 export default {
-  fetch(req, env) {
-    const p = new URL(req.url).pathname;
+  async fetch(req, env) {
+    const u = new URL(req.url), p = u.pathname;
+    if (p === '/where') {
+      // diagnostico: abra https://SEU-WORKER/where e veja em qual datacenter estao a borda (perto de voce) e a sala
+      const code = (u.searchParams.get('room') || 'sala1').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'sala1';
+      let room = '?';
+      try { room = (await (await stub(env, 'r2#' + code).fetch(req)).json()).room; } catch {}
+      return new Response(JSON.stringify({ borda: (req.cf && req.cf.colo) || '?', sala: room }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
+    }
     if (p.startsWith('/db')) return env.ROOM.get(env.ROOM.idFromName('DB#')).fetch(req);
     if (p === '/lobby') return stub(env, 'LOBBY2#').fetch(req);
     const m = p.match(/^\/room\/([a-z0-9]{3,8})$/);
