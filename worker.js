@@ -41,10 +41,6 @@ export class Room {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const u = new URL(req.url), parts = u.pathname.replace(/^\/db/, '').replace(/\.json$/, '').split('/').filter(Boolean), top = parts[0];
     if (parts.length > 4 || parts.some(x => !/^[A-Za-z0-9_-]{1,40}$/.test(x)) || (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics'].includes(top))) return J(null, 400);
-    // token de dono: o 1o a gravar reserva o registro; depois so quem manda o mesmo token altera ou apaga
-    const g = (req.method === 'PUT' || req.method === 'DELETE') ? await this.guard(req, top, parts) : null;
-    if (g && !g.ok) return J(null, 403);
-    if (g && g.rk && req.method === 'DELETE' && parts.length === 2) await this.state.storage.delete('tk:' + g.rk);
     if (top === 'pics') return this.pics(req, parts, u, J);
     if (req.method === 'GET') {
       if (!top) return J(null);
@@ -67,6 +63,27 @@ export class Room {
     if (req.method === 'PUT') o[leaf] = body; else delete o[leaf];
     await this.state.storage.put(top, root);
     return J(body);
+  }
+  async sha(t) {
+    const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+    return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+  }
+  // Donos de registros (guarda so o hash do token):
+  //  - players/<uid> e pics/<uid> (uid do aparelho): cabecalho X-Arr-Dev
+  //  - contas e indices da conta em inbox (ac, nk, id, vc): cabecalho X-Arr-Acc (derivado da senha)
+  // Registro sem dono continua aceitando gravacao (contas antigas); sem token nao reserva nada.
+  async guard(req, top, parts) {
+    const id = parts[1] || '';
+    let rk = '', hd = '';
+    if ((top === 'players' || top === 'pics') && /^[a-z0-9]{12,24}$/.test(id)) { rk = top + '/' + id; hd = 'X-Arr-Dev'; }
+    else if (top === 'inbox' && /^(ac[0-9a-f]{20}|nk[0-9a-f]{24}|id\d{6,10}|vc\d{6,10})$/.test(id)) { rk = 'inbox/' + id; hd = 'X-Arr-Acc'; }
+    if (!rk) return { ok: true };
+    const tok = req.headers.get(hd) || '';
+    const has = /^[a-f0-9]{64}$/.test(tok);
+    const stored = await this.state.storage.get('tk:' + rk);
+    if (stored) return { ok: has && (await this.sha(tok)) === stored, rk };
+    if (has) await this.state.storage.put('tk:' + rk, await this.sha(tok));
+    return { ok: true, rk };
   }
   // anti-trapaca simples: recusa saltos absurdos nas estatisticas em uma unica gravacao
   // (nao e autenticacao de verdade; ajuste os limites abaixo se o jogo gravar mais de uma partida por vez)
@@ -543,7 +560,7 @@ export default {
     }
     if (p.startsWith('/db')) {
       // responde preflight e caminhos invalidos aqui, sem acordar o Durable Object (economiza a cota do plano gratis)
-      const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Arr-Dev, X-Arr-Acc', 'Access-Control-Max-Age': '86400' };
+      const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400' };
       if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
       const top = p.replace(/^\/db\/?/, '').replace(/\.json$/, '').split('/')[0];
       if (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics'].includes(top))
