@@ -41,6 +41,10 @@ export class Room {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const u = new URL(req.url), parts = u.pathname.replace(/^\/db/, '').replace(/\.json$/, '').split('/').filter(Boolean), top = parts[0];
     if (parts.length > 4 || parts.some(x => !/^[A-Za-z0-9_-]{1,40}$/.test(x)) || (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics'].includes(top))) return J(null, 400);
+    // token de dono: o 1o a gravar reserva o registro; depois so quem manda o mesmo token altera ou apaga
+    const g = (req.method === 'PUT' || req.method === 'DELETE') ? await this.guard(req, top, parts) : null;
+    if (g && !g.ok) return J(null, 403);
+    if (g && g.rk && req.method === 'DELETE' && parts.length === 2) await this.state.storage.delete('tk:' + g.rk);
     if (top === 'pics') return this.pics(req, parts, u, J);
     if (req.method === 'GET') {
       if (!top) return J(null);
