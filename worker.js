@@ -57,6 +57,7 @@ export class Room {
     let body = null;
     if (req.method === 'PUT') { const t = await req.text(); if (t.length > 4000) return J(null, 413); try { body = JSON.parse(t); } catch { return J(null, 400); } }
     const root = (await this.state.storage.get(top)) || {};
+    if (req.method === 'PUT' && top === 'players' && !this.statsOk(root, parts, body)) return J(null, 422);
     let o = root;
     for (let i = 1; i < parts.length - 1; i++) o = o[parts[i]] = (o[parts[i]] && typeof o[parts[i]] === 'object') ? o[parts[i]] : {};
     const leaf = parts[parts.length - 1];
@@ -117,12 +118,7 @@ export class Room {
     if (d.k === 's') {
       // guarda o estado para quem entra depois, no maximo 1x por segundo (o repasse aos outros continua em tempo real)
       const t = Date.now();
-      if (!a.pt || t - a.pt > 1000) {
-        a.p = d.s; a.pt = t;
-        // o attachment aceita no maximo ~2 KB; se o estado for grande demais, nao guarda (mas continua repassando aos outros)
-        try { ws.serializeAttachment(a); }
-        catch { delete a.p; try { ws.serializeAttachment(a); } catch {} }
-      }
+      if (!a.pt || t - a.pt > 1000) { a.p = d.s; a.pt = t; ws.serializeAttachment(a); }
     }
     else if (d.k !== 'e') return;
     d.f = a.id;
