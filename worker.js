@@ -140,6 +140,24 @@ export class Room {
     const o = JSON.stringify({ k: 'ro', l: l.slice(0, 300) });
     for (const w of this.all()) if (w !== ex) { try { w.send(o); } catch {} }
   }
+  // lista de salas online abertas: [codigo, nome do dono, jogadores]. So conta quem mandou sinal nos ultimos 20s
+  roomsMsg(ex) {
+    const l = [], now = Date.now();
+    for (const w of this.all()) {
+      if (w === ex) continue;
+      const a = w.deserializeAttachment();
+      if (a && a.lb && a.rm && a.n && now - (a.rt || 0) < 20000) l.push([a.rm.c, a.n, a.rm.p]);
+    }
+    return JSON.stringify({ k: 'rl', l: l.slice(0, 50) });
+  }
+  rooms(ex) {
+    const o = this.roomsMsg(ex);
+    for (const w of this.all()) {
+      if (w === ex) continue;
+      const a = w.deserializeAttachment();
+      if (a && a.lb) { try { w.send(o); } catch {} }
+    }
+  }
   async webSocketMessage(ws, msg) {
     let d; try { d = JSON.parse(msg); } catch { return; }
     const a = ws.deserializeAttachment() || {};
@@ -151,14 +169,6 @@ export class Room {
         a.q = [1, 2, 4].includes(d.m) ? d.m : 1; a.qt = Date.now(); ws.serializeAttachment(a);
         await this.state.storage.setAlarm(Date.now() + 1500);
       } else if (d.k === 'qc') { a.q = 0; ws.serializeAttachment(a); }
-      else if (d.k === 'rm' && a.n && /^[a-z0-9]{3,8}$/.test(d.c)) {
-        // sala publica: o dono manda o codigo + quantos jogadores tem, a cada ~4s
-        const p = Math.max(1, Math.min(8, Math.floor(+d.p) || 1)), ch = !a.rm || a.rm.c !== d.c || a.rm.p !== p;
-        a.rm = { c: d.c, p }; a.rt = Date.now(); ws.serializeAttachment(a);
-        if (ch) this.rooms();
-      }
-      else if (d.k === 'rc') { if (a.rm) { delete a.rm; ws.serializeAttachment(a); this.rooms(); } }
-      else if (d.k === 'rq') { ws.send(this.roomsMsg()); }
       else if (d.k === 'iv' && a.n && /^[a-z0-9]{3,8}$/.test(d.r)) {
         const to = String(d.to || '').toLowerCase(); let ok = 0;
         for (const x of this.all()) { const b = x.deserializeAttachment(); if (x !== ws && b && b.lb && b.n && b.n.toLowerCase() === to) { try { x.send(JSON.stringify({ k: 'iv', from: a.n, c: d.r })); ok = 1; } catch {} } }
