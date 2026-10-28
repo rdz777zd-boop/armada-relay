@@ -117,7 +117,12 @@ export class Room {
     if (d.k === 's') {
       // guarda o estado para quem entra depois, no maximo 1x por segundo (o repasse aos outros continua em tempo real)
       const t = Date.now();
-      if (!a.pt || t - a.pt > 1000) { a.p = d.s; a.pt = t; ws.serializeAttachment(a); }
+      if (!a.pt || t - a.pt > 1000) {
+        a.p = d.s; a.pt = t;
+        // o attachment aceita no maximo ~2 KB; se o estado for grande demais, nao guarda (mas continua repassando aos outros)
+        try { ws.serializeAttachment(a); }
+        catch { delete a.p; try { ws.serializeAttachment(a); } catch {} }
+      }
     }
     else if (d.k !== 'e') return;
     d.f = a.id;
