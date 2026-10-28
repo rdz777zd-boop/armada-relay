@@ -120,6 +120,8 @@ export default {
   async fetch(req, env) {
     const u = new URL(req.url), p = u.pathname;
     if (p === '/mcp') return mcp(req, env);
+    // CORREÇÃO: endpoints de OAuth/descoberta devem dar 404 (senão o Claude acha que há OAuth)
+    if (p.startsWith('/.well-known/')) return new Response('Not found', { status: 404 });
     if (p === '/where') {
       const code = (u.searchParams.get('room') || 'sala1').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'sala1';
       let room = '?';
@@ -130,7 +132,8 @@ export default {
     if (p === '/lobby') return stub(env, 'LOBBY2#').fetch(req);
     if (p === '/chat') return stub(env, 'CHAT#').fetch(req);
     const m = p.match(/^\/room\/([a-z0-9]{3,8})$/);
-    if (!m) return new Response('Armada Royale relay OK');
+    // CORREÇÃO: só a raiz responde 200; o resto dá 404
+    if (!m) return p === '/' ? new Response('Armada Royale relay OK') : new Response('Not found', { status: 404 });
     return stub(env, 'r2#' + m[1]).fetch(req);
   }
 };
