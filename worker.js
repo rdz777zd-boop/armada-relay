@@ -537,7 +537,15 @@ export default {
       try { room = (await (await stub(env, 'r2#' + code).fetch(req)).json()).room; } catch {}
       return new Response(JSON.stringify({ borda: (req.cf && req.cf.colo) || '?', sala: room }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
     }
-    if (p.startsWith('/db')) return env.ROOM.get(env.ROOM.idFromName('DB#')).fetch(req);
+    if (p.startsWith('/db')) {
+      // responde preflight e caminhos invalidos aqui, sem acordar o Durable Object (economiza a cota do plano gratis)
+      const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400' };
+      if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+      const top = p.replace(/^\/db\/?/, '').replace(/\.json$/, '').split('/')[0];
+      if (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics'].includes(top))
+        return new Response('null', { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
+      return env.ROOM.get(env.ROOM.idFromName('DB#')).fetch(req);
+    }
     if (p === '/lobby') return stub(env, 'LOBBY2#').fetch(req);
     const m = p.match(/^\/room\/([a-z0-9]{3,8})$/);
     if (!m) return p === '/' ? new Response('Armada Royale relay OK') : new Response('Not found', { status: 404 });
