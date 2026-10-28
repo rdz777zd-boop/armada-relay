@@ -3,29 +3,8 @@
 // v2: rota /db/pics para foto e banner dos jogadores (o limite de 4000 caracteres recusava as imagens).
 // v3: servidor MCP somente leitura em /mcp (ranking e busca de jogador).
 // v4: novas ferramentas MCP: health_check, list_players, compare_players, get_averages.
-// v5: RESET UNICO. Quando este Worker for publicado pela primeira vez com RESET_EPOCH maior que o gravado no banco,
-// apaga TUDO (contas, nicks, IDs, ranking, cla, fotos, tokens, banidos) uma unica vez e recria so a conta do dono.
-// Para fazer outro reset no futuro, aumente RESET_EPOCH. Para NAO resetar, nao mexa neste arquivo.
-const RESET_EPOCH = 1;
-const OWNER_SEED = {
-  ac62bdcc9ac954df1c479e: { u: 'DonoFS', s: 'htrjm52q', h: 'ce0a0227ada98fbacf7f3a00ff189bebd55c1ccfc3b2a797621822436f6149e5', t: 1793145600000, nk: 'Dono', i: '33044471' },
-  nk8fb47a2ab8feae36c34af129: { u: 'DonoFS' },
-  id33044471: { u: 'DonoFS' },
-};
 export class Room {
-  constructor(state) { this.state = state; this.ep = false; }
-  async resetOnce() {
-    if (this.ep) return;
-    const cur = (await this.state.storage.get('epoch')) || 0;
-    if (cur < RESET_EPOCH) {
-      const all = await this.state.storage.list();
-      const keys = [...all.keys()].filter(k => k !== 'epoch');
-      for (let i = 0; i < keys.length; i += 128) await this.state.storage.delete(keys.slice(i, i + 128));
-      await this.state.storage.put('inbox', JSON.parse(JSON.stringify(OWNER_SEED)));
-      await this.state.storage.put('epoch', RESET_EPOCH);
-    }
-    this.ep = true;
-  }
+  constructor(state) { this.state = state; }
   all() { return this.state.getWebSockets(); }
   async pics(req, parts, u, J) {
     const ID = /^[A-Za-z0-9_-]{1,40}$/;
@@ -61,6 +40,7 @@ export class Room {
     const J = (v, s = 200) => new Response(JSON.stringify(v), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } });
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const u = new URL(req.url), parts = u.pathname.replace(/^\/db/, '').replace(/\.json$/, '').split('/').filter(Boolean), top = parts[0];
+    if (!this.ep) await this.state.blockConcurrencyWhile(() => this.resetOnce());
     if (parts.length > 4 || parts.some(x => !/^[A-Za-z0-9_-]{1,40}$/.test(x)) || (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics'].includes(top))) return J(null, 400);
     if (top === 'pics') return this.pics(req, parts, u, J);
     if (req.method === 'GET') {
