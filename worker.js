@@ -40,6 +40,7 @@ export class Room {
     const J = (v, s = 200) => new Response(JSON.stringify(v), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } });
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const u = new URL(req.url), parts = u.pathname.replace(/^\/db/, '').replace(/\.json$/, '').split('/').filter(Boolean), top = parts[0];
+    // (removido: this.resetOnce() nao existe e derrubava todas as chamadas /db com erro 500 sem CORS => "Failed to fetch" no login)
     if (parts.length > 4 || parts.some(x => !/^[A-Za-z0-9_-]{1,40}$/.test(x)) || (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics'].includes(top))) return J(null, 400);
     if (top === 'pics') return this.pics(req, parts, u, J);
     if (req.method === 'GET') {
