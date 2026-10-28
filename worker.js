@@ -57,13 +57,35 @@ export class Room {
     let body = null;
     if (req.method === 'PUT') { const t = await req.text(); if (t.length > 4000) return J(null, 413); try { body = JSON.parse(t); } catch { return J(null, 400); } }
     const root = (await this.state.storage.get(top)) || {};
-    if (req.method === 'PUT' && top === 'players' && !this.statsOk(root, parts, body)) return J(null, 422);
     let o = root;
     for (let i = 1; i < parts.length - 1; i++) o = o[parts[i]] = (o[parts[i]] && typeof o[parts[i]] === 'object') ? o[parts[i]] : {};
     const leaf = parts[parts.length - 1];
     if (req.method === 'PUT') o[leaf] = body; else delete o[leaf];
     await this.state.storage.put(top, root);
     return J(body);
+  }
+  // anti-trapaca simples: recusa saltos absurdos nas estatisticas em uma unica gravacao
+  // (nao e autenticacao de verdade; ajuste os limites abaixo se o jogo gravar mais de uma partida por vez)
+  statsOk(root, parts, body) {
+    const MAX = { k: 100, w: 5, g: 5, rw: 5, rg: 5, rp: 200 };
+    const check = (oldO, newO) => {
+      if (!newO || typeof newO !== 'object') return true;
+      for (const f in MAX) {
+        if (newO[f] === undefined) continue;
+        if (typeof newO[f] !== 'number' || !isFinite(newO[f])) return false;
+        const old = oldO && typeof oldO[f] === 'number' ? oldO[f] : null;
+        if (old !== null && newO[f] - old > MAX[f]) return false;
+      }
+      return true;
+    };
+    const rec = root[parts[1]];
+    if (parts.length === 2) return check(rec, body);
+    if (parts.length === 3 && MAX[parts[2]] !== undefined) {
+      if (typeof body !== 'number' || !isFinite(body)) return false;
+      const old = rec && typeof rec[parts[2]] === 'number' ? rec[parts[2]] : null;
+      return old === null || body - old <= MAX[parts[2]];
+    }
+    return true;
   }
   async where() {
     let colo = '?';
