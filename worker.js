@@ -1,14 +1,44 @@
 // Armada Royale 3D: salas + lobby online + fila de partida (Cloudflare Workers + Durable Objects, plano gratis)
 // Versao com salas criadas na America do Sul (locationHint 'sam') e menos gravacoes de estado.
+// v2: rota /db/pics para foto e banner dos jogadores (o limite de 4000 caracteres recusava as imagens).
 export class Room {
   constructor(state) { this.state = state; }
   all() { return this.state.getWebSockets(); }
+  async pics(req, parts, u, J) {
+    const ID = /^[A-Za-z0-9_-]{1,40}$/;
+    if (req.method === 'GET') {
+      if (parts.length === 1) {
+        const ids = (u.searchParams.get('ids') || '').split(',').filter(x => ID.test(x)).slice(0, 20);
+        const out = {};
+        if (ids.length) {
+          const m = await this.state.storage.get(ids.map(i => 'pics:' + i));
+          for (const [k, v] of m) out[k.slice(5)] = v;
+        }
+        return J(out);
+      }
+      return J((await this.state.storage.get('pics:' + parts[1])) ?? null);
+    }
+    if (parts.length !== 2) return J(null, 400);
+    if (req.method === 'DELETE') { await this.state.storage.delete('pics:' + parts[1]); return J(null); }
+    const t = await req.text();
+    if (t.length > 40000) return J(null, 413);
+    let b; try { b = JSON.parse(t); } catch { return J(null, 400); }
+    const ok = v => typeof v === 'string' && /^data:image\/jpeg;base64,[A-Za-z0-9+\/]{20,16000}={0,2}$/.test(v);
+    const o = {};
+    if (b && ok(b.a)) o.a = b.a;
+    if (b && ok(b.b)) o.b = b.b;
+    if (!o.a && !o.b) return J(null, 400);
+    o.t = Date.now();
+    await this.state.storage.put('pics:' + parts[1], o);
+    return J(true);
+  }
   async db(req) {
     const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
     const J = (v, s = 200) => new Response(JSON.stringify(v), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } });
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const u = new URL(req.url), parts = u.pathname.replace(/^\/db/, '').replace(/\.json$/, '').split('/').filter(Boolean), top = parts[0];
-    if (parts.length > 4 || parts.some(x => !/^[A-Za-z0-9_-]{1,40}$/.test(x)) || (top && !['players', 'clans', 'clanstats', 'requests', 'inbox'].includes(top))) return J(null, 400);
+    if (parts.length > 4 || parts.some(x => !/^[A-Za-z0-9_-]{1,40}$/.test(x)) || (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics'].includes(top))) return J(null, 400);
+    if (top === 'pics') return this.pics(req, parts, u, J);
     if (req.method === 'GET') {
       if (!top) return J(null);
       let v = (await this.state.storage.get(top)) ?? null;
