@@ -140,24 +140,6 @@ export class Room {
     const o = JSON.stringify({ k: 'ro', l: l.slice(0, 300) });
     for (const w of this.all()) if (w !== ex) { try { w.send(o); } catch {} }
   }
-  // lista de salas online abertas: [codigo, nome do dono, jogadores]. So conta quem mandou sinal nos ultimos 20s
-  roomsMsg(ex) {
-    const l = [], now = Date.now();
-    for (const w of this.all()) {
-      if (w === ex) continue;
-      const a = w.deserializeAttachment();
-      if (a && a.lb && a.rm && a.n && now - (a.rt || 0) < 20000) l.push([a.rm.c, a.n, a.rm.p]);
-    }
-    return JSON.stringify({ k: 'rl', l: l.slice(0, 50) });
-  }
-  rooms(ex) {
-    const o = this.roomsMsg(ex);
-    for (const w of this.all()) {
-      if (w === ex) continue;
-      const a = w.deserializeAttachment();
-      if (a && a.lb) { try { w.send(o); } catch {} }
-    }
-  }
   async webSocketMessage(ws, msg) {
     let d; try { d = JSON.parse(msg); } catch { return; }
     const a = ws.deserializeAttachment() || {};
@@ -204,7 +186,7 @@ export class Room {
   }
   webSocketClose(ws) {
     const a = ws.deserializeAttachment() || {};
-    if (a.lb) { this.roster(ws); return; }
+    if (a.lb) { this.roster(ws); if (a.rm) this.rooms(ws); return; }
     const out = JSON.stringify({ k: 'l', f: a.id });
     for (const w of this.all()) if (w !== ws) { try { w.send(out); } catch {} }
   }
