@@ -12,7 +12,8 @@ export class Room {
         const out = {};
         if (ids.length) {
           const m = await this.state.storage.get(ids.map(i => 'pics:' + i));
-          for (const [k, v] of m) out[k.slice(5)] = v;
+          const onlyT = u.searchParams.get('t');
+          for (const [k, v] of m) out[k.slice(5)] = onlyT ? ((v && v.t) || 0) : v;
         }
         return J(out);
       }
