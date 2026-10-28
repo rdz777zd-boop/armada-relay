@@ -2,6 +2,7 @@
 // Versao com salas criadas na America do Sul (locationHint 'sam') e menos gravacoes de estado.
 // v2: rota /db/pics para foto e banner dos jogadores (o limite de 4000 caracteres recusava as imagens).
 // v3: servidor MCP somente leitura em /mcp (ranking e busca de jogador).
+// v4: novas ferramentas MCP: health_check, list_players, compare_players, get_averages.
 export class Room {
   constructor(state) { this.state = state; }
   all() { return this.state.getWebSockets(); }
@@ -157,38 +158,55 @@ const MCP_CORS = {
 };
 
 const num = (x) => (typeof x === 'number' ? x : 0);
+const taxa = (v, p) => (p > 0 ? Math.round((v / p) * 1000) / 10 : 0); // percentual com 1 casa
 function jogador(uid, r) {
+  const partidas = num(r.g), vit = num(r.w), rg = num(r.rg), rw = num(r.rw);
   return {
     id: uid,
     nome: r.n,
     abates: num(r.k),
-    vitorias: num(r.w),
-    partidas: num(r.g),
+    vitorias: vit,
+    partidas,
+    taxa_vitoria: taxa(vit, partidas),
     pontos_ranqueado: num(r.rp),
-    partidas_ranqueado: num(r.rg),
-    vitorias_ranqueado: num(r.rw),
+    partidas_ranqueado: rg,
+    vitorias_ranqueado: rw,
+    taxa_vitoria_ranqueado: taxa(rw, rg),
     rt: num(r.rt),
   };
 }
 
-async function listarPlayers(env) {
-  const r = await env.ROOM.get(env.ROOM.idFromName('DB#')).fetch('https://r/db/players');
+const ID_OK = /^[A-Za-z0-9_-]{1,40}$/;
+const MAX_TEXTO = 20000;
+const cortar = (s) => (s.length > MAX_TEXTO ? s.slice(0, MAX_TEXTO) + '\n... (cortado, use limite menor ou id)' : s);
+const json = (v) => cortar(JSON.stringify(v, null, 2));
+
+// lê uma coleção do banco (somente players, clans, clanstats; nunca inbox/requests/pics)
+async function lerDb(env, caminho) {
+  const r = await env.ROOM.get(env.ROOM.idFromName('DB#')).fetch('https://r/db/' + caminho);
   if (!r.ok) throw new Error('Banco respondeu http ' + r.status);
-  const o = (await r.json()) || {};
+  return await r.json();
+}
+
+async function listarPlayers(env) {
+  const o = (await lerDb(env, 'players')) || {};
   return Object.entries(o)
     .filter(([, v]) => v && typeof v === 'object' && typeof v.n === 'string')
     .map(([uid, v]) => jogador(uid, v));
 }
 
+const CRITERIOS = ['pontos_ranqueado', 'abates', 'vitorias', 'partidas', 'taxa_vitoria', 'taxa_vitoria_ranqueado'];
+
 const MCP_TOOLS = [
   {
     name: 'get_ranking',
-    description: 'Top jogadores do Fire Strike. Ordena por pontos_ranqueado (padrão), abates ou vitorias.',
+    description: 'Top jogadores do Fire Strike. Ordena por pontos_ranqueado (padrão), abates, vitorias, partidas, taxa_vitoria ou taxa_vitoria_ranqueado.',
     inputSchema: {
       type: 'object',
       properties: {
-        por: { type: 'string', enum: ['pontos_ranqueado', 'abates', 'vitorias'], description: 'Critério de ordenação' },
+        por: { type: 'string', enum: CRITERIOS, description: 'Critério de ordenação' },
         limite: { type: 'number', description: 'Quantos jogadores (1 a 50, padrão 10)' },
+        min_partidas: { type: 'number', description: 'Só jogadores com pelo menos X partidas (útil para taxas de vitória)' },
       },
     },
   },
@@ -201,23 +219,246 @@ const MCP_TOOLS = [
       required: ['nome'],
     },
   },
+  {
+    name: 'get_player',
+    description: 'Devolve as estatísticas de um jogador pelo id (uid) e a posição dele no ranking ranqueado.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'ID (uid) do jogador' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'get_summary',
+    description: 'Resumo geral do jogo: total de jogadores, somas de abates/vitórias/partidas e os 3 melhores do ranqueado.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'list_clans',
+    description: 'Lista os clãs cadastrados (dados brutos do banco).',
+    inputSchema: {
+      type: 'object',
+      properties: { limite: { type: 'number', description: 'Quantos clãs (1 a 50, padrão 20)' } },
+    },
+  },
+  {
+    name: 'find_clan',
+    description: 'Procura clãs cujo registro contenha o texto informado (nome ou tag, ignora maiúsculas).',
+    inputSchema: {
+      type: 'object',
+      properties: { nome: { type: 'string', description: 'Texto a procurar' } },
+      required: ['nome'],
+    },
+  },
+  {
+    name: 'get_clan',
+    description: 'Devolve o registro de um clã pelo id e as estatísticas dele (clanstats), se existirem.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'ID do clã' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'read_db',
+    description: 'Leitura bruta do banco. colecao: players, clans ou clanstats. Com id lê só um registro; sem id lista até 50.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        colecao: { type: 'string', enum: ['players', 'clans', 'clanstats'], description: 'Coleção' },
+        id: { type: 'string', description: 'ID do registro (opcional)' },
+        limite: { type: 'number', description: 'Quantos registros ao listar (1 a 50, padrão 20)' },
+      },
+      required: ['colecao'],
+    },
+  },
+  // ---- novas na v4 ----
+  {
+    name: 'health_check',
+    description: 'Diagnóstico: testa se o banco responde, conta registros em players/clans/clanstats e mostra os campos de um jogador de exemplo.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'list_players',
+    description: 'Lista jogadores com paginação, ordenados por um critério (padrão pontos_ranqueado).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        por: { type: 'string', enum: CRITERIOS, description: 'Critério de ordenação' },
+        pagina: { type: 'number', description: 'Página (começa em 1)' },
+        limite: { type: 'number', description: 'Jogadores por página (1 a 50, padrão 20)' },
+        min_partidas: { type: 'number', description: 'Só jogadores com pelo menos X partidas' },
+      },
+    },
+  },
+  {
+    name: 'compare_players',
+    description: 'Compara dois jogadores lado a lado (por nome ou id) e mostra a diferença em cada estatística.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        a: { type: 'string', description: 'Nome ou id do primeiro jogador' },
+        b: { type: 'string', description: 'Nome ou id do segundo jogador' },
+      },
+      required: ['a', 'b'],
+    },
+  },
+  {
+    name: 'get_averages',
+    description: 'Médias do jogo (abates, vitórias, partidas, pontos, taxa geral de vitória) e o recordista em cada critério.',
+    inputSchema: {
+      type: 'object',
+      properties: { min_partidas: { type: 'number', description: 'Mínimo de partidas para entrar nos recordes de taxa (padrão 10)' } },
+    },
+  },
 ];
+
+const limitar = (x, pad, max) => Math.max(1, Math.min(max, Math.floor(+x || pad)));
+const primeiros = (o, n) => Object.fromEntries(Object.entries(o || {}).slice(0, n));
+const media = (arr, f) => (arr.length ? Math.round((arr.reduce((s, p) => s + p[f], 0) / arr.length) * 10) / 10 : 0);
+
+// acha um jogador por id exato, nome exato ou nome parcial (nessa ordem)
+function achar(todos, q) {
+  const s = String(q || '').trim();
+  if (!s) return null;
+  const l = s.toLowerCase();
+  return todos.find((p) => p.id === s) || todos.find((p) => p.nome.toLowerCase() === l) || todos.find((p) => p.nome.toLowerCase().includes(l)) || null;
+}
 
 async function mcpFerramenta(env, name, a) {
   a = a || {};
-  const todos = await listarPlayers(env);
   if (name === 'get_ranking') {
-    const por = ['abates', 'vitorias', 'pontos_ranqueado'].includes(a.por) ? a.por : 'pontos_ranqueado';
-    const lim = Math.max(1, Math.min(50, Math.floor(+a.limite || 10)));
-    const top = todos.sort((x, y) => y[por] - x[por]).slice(0, lim);
-    return JSON.stringify({ ordenado_por: por, total_jogadores: todos.length, top }, null, 2);
+    const todos = await listarPlayers(env);
+    const por = CRITERIOS.includes(a.por) ? a.por : 'pontos_ranqueado';
+    const lim = limitar(a.limite, 10, 50);
+    const min = Math.max(0, Math.floor(+a.min_partidas || 0));
+    const base = min ? todos.filter((p) => p.partidas >= min) : todos;
+    const top = base.sort((x, y) => y[por] - x[por]).slice(0, lim);
+    return json({ ordenado_por: por, total_jogadores: todos.length, considerados: base.length, top });
   }
   if (name === 'find_player') {
+    const todos = await listarPlayers(env);
     const n = String(a.nome || '').toLowerCase().trim();
     if (!n) throw new Error('Informe o nome');
     const achou = todos.filter((p) => p.nome.toLowerCase() === n);
     const parecidos = achou.length ? achou : todos.filter((p) => p.nome.toLowerCase().includes(n)).slice(0, 10);
-    return parecidos.length ? JSON.stringify(parecidos, null, 2) : 'Jogador não encontrado.';
+    return parecidos.length ? json(parecidos) : 'Jogador não encontrado.';
+  }
+  if (name === 'get_player') {
+    const id = String(a.id || '');
+    if (!ID_OK.test(id)) throw new Error('ID inválido');
+    const todos = await listarPlayers(env);
+    const p = todos.find((x) => x.id === id);
+    if (!p) return 'Jogador não encontrado.';
+    const ordem = todos.slice().sort((x, y) => y.pontos_ranqueado - x.pontos_ranqueado);
+    return json({ ...p, posicao_ranqueado: ordem.findIndex((x) => x.id === id) + 1, de: todos.length });
+  }
+  if (name === 'get_summary') {
+    const todos = await listarPlayers(env);
+    const soma = (f) => todos.reduce((s, p) => s + p[f], 0);
+    const top3 = todos.slice().sort((x, y) => y.pontos_ranqueado - x.pontos_ranqueado).slice(0, 3);
+    return json({
+      total_jogadores: todos.length,
+      total_abates: soma('abates'),
+      total_vitorias: soma('vitorias'),
+      total_partidas: soma('partidas'),
+      total_partidas_ranqueado: soma('partidas_ranqueado'),
+      top3_ranqueado: top3,
+    });
+  }
+  if (name === 'list_clans') {
+    const o = (await lerDb(env, 'clans')) || {};
+    const lim = limitar(a.limite, 20, 50);
+    return json({ total_clas: Object.keys(o).length, clas: primeiros(o, lim) });
+  }
+  if (name === 'find_clan') {
+    const n = String(a.nome || '').toLowerCase().trim();
+    if (!n) throw new Error('Informe o nome');
+    const o = (await lerDb(env, 'clans')) || {};
+    const achou = Object.entries(o).filter(([id, v]) => (id + ' ' + JSON.stringify(v)).toLowerCase().includes(n)).slice(0, 10);
+    return achou.length ? json(Object.fromEntries(achou)) : 'Clã não encontrado.';
+  }
+  if (name === 'get_clan') {
+    const id = String(a.id || '');
+    if (!ID_OK.test(id)) throw new Error('ID inválido');
+    const [clan, stats] = await Promise.all([lerDb(env, 'clans/' + id), lerDb(env, 'clanstats/' + id)]);
+    if (clan === null && stats === null) return 'Clã não encontrado.';
+    return json({ id, clan, clanstats: stats });
+  }
+  if (name === 'read_db') {
+    if (!['players', 'clans', 'clanstats'].includes(a.colecao)) throw new Error('Coleção inválida');
+    if (a.id !== undefined && a.id !== '') {
+      const id = String(a.id);
+      if (!ID_OK.test(id)) throw new Error('ID inválido');
+      return json(await lerDb(env, a.colecao + '/' + id));
+    }
+    const o = (await lerDb(env, a.colecao)) || {};
+    return json({ total: Object.keys(o).length, registros: primeiros(o, limitar(a.limite, 20, 50)) });
+  }
+  // ---- novas na v4 ----
+  if (name === 'health_check') {
+    const t0 = Date.now();
+    const cols = ['players', 'clans', 'clanstats'];
+    const res = await Promise.all(cols.map((c) => lerDb(env, c).then((v) => ({ ok: true, v })).catch((e) => ({ ok: false, erro: e.message }))));
+    const out = { ms: Date.now() - t0 };
+    cols.forEach((c, i) => {
+      const r = res[i];
+      out[c] = r.ok ? { ok: true, total: Object.keys(r.v || {}).length } : { ok: false, erro: r.erro };
+    });
+    const pl = res[0].ok ? res[0].v || {} : {};
+    const validos = Object.values(pl).filter((v) => v && typeof v === 'object' && typeof v.n === 'string');
+    out.players.validos = validos.length;
+    out.campos_exemplo_player = validos[0] ? Object.keys(validos[0]) : [];
+    out.tudo_ok = res.every((r) => r.ok);
+    out.aviso = out.players.total === 0 ? 'Banco de players vazio: se era para ter dados, o Worker pode estar apontando para outro Durable Object (DB#) ou os dados não foram migrados.' : undefined;
+    return json(out);
+  }
+  if (name === 'list_players') {
+    const todos = await listarPlayers(env);
+    const por = CRITERIOS.includes(a.por) ? a.por : 'pontos_ranqueado';
+    const lim = limitar(a.limite, 20, 50);
+    const min = Math.max(0, Math.floor(+a.min_partidas || 0));
+    const base = (min ? todos.filter((p) => p.partidas >= min) : todos).sort((x, y) => y[por] - x[por]);
+    const paginas = Math.max(1, Math.ceil(base.length / lim));
+    const pagina = Math.min(paginas, Math.max(1, Math.floor(+a.pagina || 1)));
+    return json({ ordenado_por: por, total: base.length, pagina, paginas, jogadores: base.slice((pagina - 1) * lim, pagina * lim) });
+  }
+  if (name === 'compare_players') {
+    const todos = await listarPlayers(env);
+    const A = achar(todos, a.a), B = achar(todos, a.b);
+    if (!A || !B) return 'Não encontrei ' + (!A && !B ? 'nenhum dos dois' : !A ? 'o jogador a' : 'o jogador b') + '.';
+    const campos = ['abates', 'vitorias', 'partidas', 'taxa_vitoria', 'pontos_ranqueado', 'partidas_ranqueado', 'vitorias_ranqueado', 'taxa_vitoria_ranqueado'];
+    const diferenca = {};
+    for (const c of campos) diferenca[c] = Math.round((A[c] - B[c]) * 10) / 10; // positivo = a na frente
+    return json({ a: A, b: B, diferenca_a_menos_b: diferenca });
+  }
+  if (name === 'get_averages') {
+    const todos = await listarPlayers(env);
+    if (!todos.length) return 'Sem jogadores no banco.';
+    const min = Math.max(0, Math.floor(a.min_partidas === undefined ? 10 : +a.min_partidas || 0));
+    const rec = (f, base) => { const t = base.slice().sort((x, y) => y[f] - x[f])[0]; return t ? { nome: t.nome, id: t.id, valor: t[f] } : null; };
+    const elegiveis = todos.filter((p) => p.partidas >= min);
+    const elegiveisRank = todos.filter((p) => p.partidas_ranqueado >= min);
+    const totV = todos.reduce((s, p) => s + p.vitorias, 0), totP = todos.reduce((s, p) => s + p.partidas, 0);
+    return json({
+      total_jogadores: todos.length,
+      medias: {
+        abates: media(todos, 'abates'),
+        vitorias: media(todos, 'vitorias'),
+        partidas: media(todos, 'partidas'),
+        pontos_ranqueado: media(todos, 'pontos_ranqueado'),
+        taxa_vitoria_geral: taxa(totV, totP),
+      },
+      min_partidas_para_taxas: min,
+      recordes: {
+        pontos_ranqueado: rec('pontos_ranqueado', todos),
+        abates: rec('abates', todos),
+        vitorias: rec('vitorias', todos),
+        partidas: rec('partidas', todos),
+        taxa_vitoria: rec('taxa_vitoria', elegiveis),
+        taxa_vitoria_ranqueado: rec('taxa_vitoria_ranqueado', elegiveisRank),
+      },
+    });
   }
   throw new Error('Ferramenta desconhecida: ' + name);
 }
@@ -230,7 +471,7 @@ async function mcpTratar(env, msg) {
     return ok({
       protocolVersion: (params && params.protocolVersion) || '2025-03-26',
       capabilities: { tools: {} },
-      serverInfo: { name: 'Fire Strike', version: '1.0.0' },
+      serverInfo: { name: 'Fire Strike', version: '1.2.0' },
     });
   if (method === 'ping') return ok({});
   if (method === 'tools/list') return ok({ tools: MCP_TOOLS });
