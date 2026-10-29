@@ -58,6 +58,12 @@ export class Room {
     let body = null;
     if (req.method === 'PUT') { const t = await req.text(); if (t.length > 4000) return J(null, 413); try { body = JSON.parse(t); } catch { return J(null, 400); } }
     const root = (await this.state.storage.get(top)) || {};
+    // protecao opcional: so ativa se a variavel ENFORCE=1 estiver definida no Worker (padrao desligado, nada muda)
+    if (this.env.ENFORCE === '1') {
+      const g = await this.guard(req, top, parts);
+      if (!g.ok) return J(null, 403);
+      if (top === 'players' && req.method === 'PUT' && !this.statsOk(root, parts, body)) return J(null, 409);
+    }
     let o = root;
     for (let i = 1; i < parts.length - 1; i++) o = o[parts[i]] = (o[parts[i]] && typeof o[parts[i]] === 'object') ? o[parts[i]] : {};
     const leaf = parts[parts.length - 1];
