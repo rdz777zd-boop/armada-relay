@@ -173,6 +173,10 @@ export class Room {
       if (!a.pt || t - a.pt > 1000) { a.p = d.s; a.pt = t; ws.serializeAttachment(a); }
     }
     else if (d.k !== 'e') return;
+    if (d.k === 'e' && d.m && d.m.t === 'gc' && (d.m.a || d.m.u) && this.env.OWNER_KEY) {
+      const pl = d.m.a ? String(d.m.x || '') : 'u' + d.m.u;
+      if (typeof d.m.ok !== 'string' || d.m.ok !== await this.sha(this.env.OWNER_KEY + ':' + d.m.ts + ':' + pl)) return;
+    }
     d.f = a.id;
     const out = JSON.stringify(d);
     for (const w of this.all()) if (w !== ws) { try { w.send(out); } catch {} }
