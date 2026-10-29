@@ -36,7 +36,7 @@ export class Room {
     return J(true);
   }
   async db(req) {
-    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Arr-Dev, X-Arr-Acc, X-Arr-Owner' };
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Arr-Dev, X-Arr-Acc, X-Arr-Owner, X-Arr-Snap' };
     const J = (v, s = 200) => new Response(JSON.stringify(v), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } });
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const u = new URL(req.url), parts = u.pathname.replace(/^\/db/, '').replace(/\.json$/, '').split('/').filter(Boolean), top = parts[0];
