@@ -192,7 +192,7 @@ export class Room {
   }
   webSocketClose(ws) {
     const a = ws.deserializeAttachment() || {};
-    if (a.lb) { this.roster(ws); if (a.rm) this.rooms(ws); return; }
+    if (a.lb) { this.roster(ws); return; }
     const out = JSON.stringify({ k: 'l', f: a.id });
     for (const w of this.all()) if (w !== ws) { try { w.send(out); } catch {} }
   }
