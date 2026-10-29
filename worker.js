@@ -36,14 +36,13 @@ export class Room {
     return J(true);
   }
   async db(req) {
-    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Arr-Dev, X-Arr-Acc, X-Arr-Owner' };
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Arr-Dev, X-Arr-Acc, X-Arr-Owner, X-Arr-Snap' };
     const J = (v, s = 200) => new Response(JSON.stringify(v), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } });
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const u = new URL(req.url), parts = u.pathname.replace(/^\/db/, '').replace(/\.json$/, '').split('/').filter(Boolean), top = parts[0];
     if (!this.ep) await this.state.blockConcurrencyWhile(() => 0);
     if (parts.length > 4 || parts.some(x => !/^[A-Za-z0-9_-]{1,40}$/.test(x)) || (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics'].includes(top))) return J(null, 400);
     if (top === 'pics') return this.pics(req, parts, u, J);
-    if (top === 'snaps') return this.snaps(req, parts, J);
     if (req.method === 'GET') {
       if (!top) return J(null);
       let v = (await this.state.storage.get(top)) ?? null;
@@ -73,6 +72,27 @@ export class Room {
     if (req.method === 'PUT') o[leaf] = body; else delete o[leaf];
     await this.state.storage.put(top, root);
     return J(body);
+  }
+  // v5: /db/snaps/<id> guarda o pacote de progresso de cada conta (cofre privado).
+  // id = 'sn' + 30 primeiros hex de sha256('snap:' + token). O token (derivado de usuario+senha) vai no cabecalho X-Arr-Snap;
+  // sem o token certo nao le nem grava. PUT com {d, b}: b = versao que o aparelho viu; se a nuvem mudou desde entao, responde 409.
+  async snaps(req, parts, J) {
+    if (parts.length !== 2 || !/^sn[0-9a-f]{30}$/.test(parts[1])) return J(null, 400);
+    const tok = req.headers.get('X-Arr-Snap') || '';
+    if (!/^[a-f0-9]{64}$/.test(tok) || (await this.sha('snap:' + tok)).slice(0, 30) !== parts[1].slice(2)) return J(null, 403);
+    const key = 'snap:' + parts[1];
+    const cur = (await this.state.storage.get(key)) ?? null;
+    if (req.method === 'GET') return J(cur);
+    if (req.method === 'DELETE') { await this.state.storage.delete(key); return J(null); }
+    if (req.method !== 'PUT') return J(null, 400);
+    const t = await req.text();
+    if (t.length > 110000) return J(null, 413);
+    let b; try { b = JSON.parse(t); } catch { return J(null, 400); }
+    if (!b || typeof b.d !== 'string' || b.d.length > 100000 || !/^(g1|j1):/.test(b.d)) return J(null, 400);
+    if (cur && cur.t !== (+b.b || 0)) return J({ conflict: 1, t: cur.t }, 409);
+    const now = Math.max(Date.now(), cur ? cur.t + 1 : 0);
+    try { await this.state.storage.put(key, { d: b.d, t: now }); } catch { return J(null, 413); }
+    return J({ t: now });
   }
   async sha(t) {
     const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
