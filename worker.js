@@ -4,7 +4,7 @@
 // v3: servidor MCP somente leitura em /mcp (ranking e busca de jogador).
 // v4: novas ferramentas MCP: health_check, list_players, compare_players, get_averages.
 export class Room {
-  constructor(state) { this.state = state; }
+  constructor(state, env) { this.state = state; this.env = env || {}; }
   all() { return this.state.getWebSockets(); }
   async pics(req, parts, u, J) {
     const ID = /^[A-Za-z0-9_-]{1,40}$/;
