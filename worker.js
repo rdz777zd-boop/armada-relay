@@ -567,7 +567,7 @@ export default {
     }
     if (p.startsWith('/db')) {
       // responde preflight e caminhos invalidos aqui, sem acordar o Durable Object (economiza a cota do plano gratis)
-      const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Arr-Dev, X-Arr-Acc', 'Access-Control-Max-Age': '86400' };
+      const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Arr-Dev, X-Arr-Acc, X-Arr-Owner', 'Access-Control-Max-Age': '86400' };
       if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
       const top = p.replace(/^\/db\/?/, '').replace(/\.json$/, '').split('/')[0];
       if (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics'].includes(top))
