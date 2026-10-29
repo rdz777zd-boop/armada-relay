@@ -36,13 +36,14 @@ export class Room {
     return J(true);
   }
   async db(req) {
-    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Arr-Dev, X-Arr-Acc, X-Arr-Owner, X-Arr-Snap' };
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Arr-Dev, X-Arr-Acc, X-Arr-Owner' };
     const J = (v, s = 200) => new Response(JSON.stringify(v), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } });
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const u = new URL(req.url), parts = u.pathname.replace(/^\/db/, '').replace(/\.json$/, '').split('/').filter(Boolean), top = parts[0];
     if (!this.ep) await this.state.blockConcurrencyWhile(() => 0);
     if (parts.length > 4 || parts.some(x => !/^[A-Za-z0-9_-]{1,40}$/.test(x)) || (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics'].includes(top))) return J(null, 400);
     if (top === 'pics') return this.pics(req, parts, u, J);
+    if (top === 'snaps') return this.snaps(req, parts, J);
     if (req.method === 'GET') {
       if (!top) return J(null);
       let v = (await this.state.storage.get(top)) ?? null;
@@ -576,7 +577,7 @@ export default {
       const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Arr-Dev, X-Arr-Acc, X-Arr-Owner', 'Access-Control-Max-Age': '86400' };
       if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
       const top = p.replace(/^\/db\/?/, '').replace(/\.json$/, '').split('/')[0];
-      if (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics', 'snaps'].includes(top))
+      if (top && !['players', 'clans', 'clanstats', 'requests', 'inbox', 'pics'].includes(top))
         return new Response('null', { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
       return env.ROOM.get(env.ROOM.idFromName('DB#')).fetch(req);
     }
