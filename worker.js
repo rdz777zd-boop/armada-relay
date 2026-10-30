@@ -56,7 +56,7 @@ export class Room {
     }
     if (parts.length < 2 || (req.method !== 'PUT' && req.method !== 'DELETE')) return J(null, 400);
     // chave do dono (opcional): so vale se OWNER_KEY estiver definida no Worker; protege banlist e verlist
-    if (this.env.OWNER_KEY && top === 'inbox' && (parts[1] === 'banlist' || parts[1] === 'verlist') && req.headers.get('X-Arr-Owner') !== this.env.OWNER_KEY) return J(null, 403);
+    if (this.env.OWNER_KEY && top === 'inbox' && (parts[1] === 'banlist' || parts[1] === 'verlist' || parts[1] === 'giftlist') && req.headers.get('X-Arr-Owner') !== this.env.OWNER_KEY) return J(null, 403);
     let body = null;
     if (req.method === 'PUT') { const t = await req.text(); if (t.length > 4000) return J(null, 413); try { body = JSON.parse(t); } catch { return J(null, 400); } }
     const root = (await this.state.storage.get(top)) || {};
